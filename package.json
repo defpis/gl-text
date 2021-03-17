@@ -1,0 +1,41 @@
+{
+  "name": "gl-text",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "NODE_ENV=development webpack serve",
+    "build": "NODE_ENV=production webpack"
+  },
+  "dependencies": {
+    "gl-matrix": "*",
+    "lodash": "*",
+    "normalize.css": "*",
+    "opentype.js": "*",
+    "resize-observer-polyfill": "*",
+    "rxjs": "*",
+    "twgl.js": "*"
+  },
+  "devDependencies": {
+    "@babel/core": "*",
+    "@babel/plugin-proposal-class-properties": "*",
+    "@babel/plugin-proposal-decorators": "*",
+    "@babel/plugin-transform-runtime": "*",
+    "@babel/preset-env": "*",
+    "@babel/preset-typescript": "*",
+    "@types/lodash": "*",
+    "@types/opentype.js": "*",
+    "babel-loader": "*",
+    "clean-webpack-plugin": "*",
+    "copy-webpack-plugin": "*",
+    "css-loader": "*",
+    "file-loader": "*",
+    "html-webpack-plugin": "^5.0.0-alpha.10",
+    "sass": "*",
+    "sass-loader": "*",
+    "shader-loader": "*",
+    "style-loader": "*",
+    "webpack": "*",
+    "webpack-cli": "*",
+    "webpack-dev-server": "*"
+  }
+}

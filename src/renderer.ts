@@ -1,5 +1,4 @@
 import * as twgl from "twgl.js";
-import opentype from "opentype.js";
 import glyphMain from "./shaders/glyphMain";
 import glyphQuad from "./shaders/glyphQuad";
 import glyphPostProcess from "./shaders/glyphPostProcess";
@@ -201,6 +200,8 @@ class GlyphRenderer implements Drawable {
       this.factorMSAA
     );
     gl.bindVertexArray(null);
+
+    gl.blendFunc(gl.ONE, gl.ZERO);
   }
 }
 
@@ -269,11 +270,9 @@ class GlyphPostProcessRenderer implements Drawable {
 
   draw() {
     const { gl } = this;
-    const { width, height } = gl.canvas;
 
-    gl.viewport(0, 0, width, height);
-    gl.clearColor(0, 0, 0, 0);
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_COLOR, gl.ONE_MINUS_SRC_ALPHA);
 
     gl.useProgram(this.program);
     // prettier-ignore
@@ -293,6 +292,8 @@ class GlyphPostProcessRenderer implements Drawable {
     gl.bindVertexArray(this.vao);
     gl.drawElements(gl.TRIANGLE_STRIP, this.count, gl.UNSIGNED_SHORT, 0);
     gl.bindVertexArray(null);
+
+    gl.blendFunc(gl.ONE, gl.ZERO);
   }
 }
 
@@ -317,14 +318,10 @@ const aaColors = [
 
 export class Renderer {
   gl: WebGL2RenderingContext;
-  private _tickId: number = -1;
-  private _started: boolean = false;
 
   frameBufferInfo: twgl.FramebufferInfo;
   glyphRenderer: GlyphRenderer;
   glyphPostProcessRenderer: GlyphPostProcessRenderer;
-
-  private _drawCalls: Array<(aaInfo: AAInfo) => void> = [];
 
   get attachments() {
     const { gl } = this;
@@ -358,7 +355,7 @@ export class Renderer {
     );
   }
 
-  updateFrameBuffer() {
+  render(pathInfo: PathInfo) {
     const { gl } = this;
     const { width, height } = gl.canvas;
 
@@ -371,113 +368,26 @@ export class Renderer {
     );
     twgl.bindFramebufferInfo(gl, this.frameBufferInfo);
 
+    gl.viewport(0, 0, width, height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    this._drawCalls.forEach((draw) =>
-      draw({
-        aaDeltas: aaDeltas1,
-        aaColors: aaColors,
-      })
-    );
+    this.glyphRenderer.genBuffer(pathInfo, {
+      aaDeltas: aaDeltas1,
+      aaColors: aaColors,
+    });
+    this.glyphRenderer.draw();
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.NONE]);
 
-    this._drawCalls.forEach((draw) =>
-      draw({
-        aaDeltas: aaDeltas2,
-        aaColors: aaColors,
-      })
-    );
+    this.glyphRenderer.genBuffer(pathInfo, {
+      aaDeltas: aaDeltas2,
+      aaColors: aaColors,
+    });
+    this.glyphRenderer.draw();
     gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
 
     twgl.bindFramebufferInfo(gl);
-  }
 
-  parsePath(path: opentype.Path): PathInfo {
-    let box = path.getBoundingBox();
-    const positions = [box.x1, box.y1];
-    const indices = [0];
-    let startIndex = 0;
-    const quadPositions: number[] = [];
-
-    path.commands.forEach((cmd) => {
-      let index = positions.length / 2;
-      switch (cmd.type) {
-        case "Z": {
-          indices.push(startIndex);
-          indices.push(0xffff);
-          indices.push(startIndex);
-          startIndex = index;
-          break;
-        }
-        case "Q": {
-          quadPositions.push(positions[positions.length - 2]);
-          quadPositions.push(positions[positions.length - 1]);
-          quadPositions.push(cmd.x1);
-          quadPositions.push(cmd.y1);
-          quadPositions.push(cmd.x);
-          quadPositions.push(cmd.y);
-          // continue go to default
-        }
-        default: {
-          positions.push(cmd.x);
-          positions.push(cmd.y);
-          indices.push(index);
-        }
-      }
-    });
-
-    const quadIndices = new Array(quadPositions.length / 2);
-    const barycentric = new Array(quadPositions.length);
-    for (let i = 0; i < quadPositions.length / 2; i++) {
-      quadIndices[i] = i;
-      barycentric[i * 2] = i % 3 == 0 ? 1.0 : 0.0;
-      barycentric[i * 2 + 1] = i % 3 == 1 ? 1.0 : 0.0;
-    }
-
-    return {
-      positions,
-      indices,
-      quadPositions,
-      quadIndices,
-      barycentric,
-    };
-  }
-
-  render(paths: opentype.Path[]) {
-    this._drawCalls = [];
-
-    paths.forEach((path) => {
-      const pathInfo = this.parsePath(path);
-
-      this._drawCalls.push((aaInfo) => {
-        this.glyphRenderer.genBuffer(pathInfo, aaInfo);
-        this.glyphRenderer.draw();
-      });
-    });
-
-    this.updateFrameBuffer();
-    this.start();
-  }
-
-  tick = () => {
     this.glyphPostProcessRenderer.draw();
-    if (this._started) {
-      this._tickId = requestAnimationFrame(this.tick);
-    }
-  };
-
-  start() {
-    if (!this._started) {
-      this._started = true;
-      this.tick();
-    }
-  }
-
-  stop() {
-    if (this._started) {
-      this._started = false;
-      cancelAnimationFrame(this._tickId);
-    }
   }
 }

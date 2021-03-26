@@ -26,5 +26,9 @@ void main()
         de.x + de.y + abc.r
     ) / 6.0;
 
+    if (res.r == 0.0 && res.g == 0.0 && res.b == 0.0) {
+        discard;
+    }
+
     fout_color = vec4(1.0 - res, 1.0);
 }

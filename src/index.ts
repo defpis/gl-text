@@ -15,20 +15,20 @@ const mousemove$ = fromEvent<MouseEvent>(canvas, "mousemove");
 const mouseup$ = fromEvent<MouseEvent>(canvas, "mouseup");
 const wheel$ = fromEvent<WheelEvent>(canvas, "wheel");
 
-export let transfrom = { x: 0, y: 0, scale: 1 };
+export let transform = { x: 0, y: 0, z: 1 };
 let startPos = { x: 0, y: 0 };
 
 mousedown$
   .pipe(
     switchMap(({ x, y }) => {
-      startPos.x = x - transfrom.x;
-      startPos.y = y - transfrom.y;
+      startPos.x = x - transform.x;
+      startPos.y = y - transform.y;
       return mousemove$.pipe(throttleTime(16.7), takeUntil(mouseup$));
     })
   )
   .subscribe(({ x, y }) => {
-    transfrom.x = x - startPos.x;
-    transfrom.y = y - startPos.y;
+    transform.x = x - startPos.x;
+    transform.y = y - startPos.y;
   });
 
 wheel$.pipe(throttleTime(16.7)).subscribe((event) => {
@@ -38,19 +38,19 @@ wheel$.pipe(throttleTime(16.7)).subscribe((event) => {
     const { x, y } = event;
 
     const pos = {
-      x: (x - transfrom.x) / transfrom.scale,
-      y: (y - transfrom.y) / transfrom.scale,
+      x: (x - transform.x) / transform.z,
+      y: (y - transform.y) / transform.z,
     };
 
-    transfrom.scale *= 1 - event.deltaY / 20;
+    transform.z *= 1 - event.deltaY / 20;
 
-    transfrom.x = x - pos.x * transfrom.scale;
-    transfrom.y = y - pos.y * transfrom.scale;
+    transform.x = x - pos.x * transform.z;
+    transform.y = y - pos.y * transform.z;
 
-    console.log(transfrom.scale);
+    console.log(transform.z);
   } else {
-    transfrom.x -= event.deltaX;
-    transfrom.y -= event.deltaY;
+    transform.x -= event.deltaX;
+    transform.y -= event.deltaY;
   }
 });
 
@@ -69,8 +69,8 @@ const gl = canvas.getContext("webgl2") as WebGL2RenderingContext;
 const renderer = new Renderer(gl);
 
 function parsePath(path: opentype.Path) {
-  let box = path.getBoundingBox();
-  const positions = [box.x1, box.y1];
+  const boundingBox = path.getBoundingBox();
+  const positions = [boundingBox.x1, boundingBox.y1];
   const indices = [0];
   let startIndex = 0;
   const quadPositions: number[] = [];
@@ -116,16 +116,15 @@ function parsePath(path: opentype.Path) {
     quadPositions,
     quadIndices,
     barycentric,
+    boundingBox,
   };
 }
 
 opentype.load(PingFang, (err, font) => {
   if (err || !font) return;
 
-  const path1 = font.getPath("Text1", 0, 72 * 1, 72);
-  const path2 = font.getPath("Text2", 0, 72 * 1.5, 72);
-  const pathInfo1 = parsePath(path1);
-  const pathInfo2 = parsePath(path2);
+  const path = font.getPath("你好", 0, 72 * 1, 72);
+  const pathInfo = parsePath(path);
 
   (function tick() {
     requestAnimationFrame(tick);
@@ -136,7 +135,6 @@ opentype.load(PingFang, (err, font) => {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    renderer.render(pathInfo1);
-    renderer.render(pathInfo2);
+    renderer.render(pathInfo);
   })();
 });

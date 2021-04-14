@@ -2,10 +2,11 @@ import * as twgl from "twgl.js";
 import glyphMain from "./shaders/glyphMain";
 import glyphQuad from "./shaders/glyphQuad";
 import glyphPostProcess from "./shaders/glyphPostProcess";
-import { transfrom } from ".";
+import { transform } from ".";
+import { clamp } from "lodash";
 
 interface Drawable {
-  draw(): void;
+  draw(...args: any[]): void;
 }
 
 interface PathInfo {
@@ -14,6 +15,7 @@ interface PathInfo {
   quadPositions: number[];
   quadIndices: number[];
   barycentric: number[];
+  boundingBox: opentype.BoundingBox;
 }
 
 interface AAInfo {
@@ -76,7 +78,7 @@ class GlyphRenderer implements Drawable {
     const aaDeltasBuffer = twgl.createBufferFromTypedArray(
       gl,
       new Float32Array(
-        aaDeltas.map((v) => v / window.devicePixelRatio / transfrom.scale)
+        aaDeltas.map((v) => v / window.devicePixelRatio / transform.z)
       )
     );
     const aaColorsBuffer = twgl.createBufferFromTypedArray(
@@ -153,21 +155,17 @@ class GlyphRenderer implements Drawable {
     this.inited = true;
   }
 
-  draw(): void {
+  draw(w: number, h: number): void {
     if (!this.inited) return;
 
     const { gl } = this;
-    const dpr = window.devicePixelRatio;
-    const { width, height } = gl.canvas;
-    const w = width / dpr;
-    const h = height / dpr;
 
     // prettier-ignore
     const matrix = [
-      2.0 / w * transfrom.scale, 0.0, 0.0, 0.0,
-      0.0, -2.0 / h * transfrom.scale, 0.0, 0.0,
+      2.0 / w, 0.0, 0.0, 0.0,
+      0.0, -2.0 / h, 0.0, 0.0,
       0.0, 0.0, 1.0, 0.0,
-      -1.0 + transfrom.x * 2 / w, 1.0 - transfrom.y * 2 / h, 0.0, 1.0,
+      -1.0, 1.0, 0.0, 1.0,
     ];
 
     const uniform = {
@@ -227,26 +225,30 @@ class GlyphPostProcessRenderer implements Drawable {
     ]);
     this.attribSetters = twgl.createAttributeSetters(gl, this.program);
     this.uniformSetters = twgl.createUniformSetters(gl, this.program);
+  }
+
+  genBuffer(topLeft: any, bottomRight: any) {
+    const { gl } = this;
 
     // prettier-ignore
     const positions = new Float32Array([
-			-1.0, -1.0,
-			-1.0,  1.0,
-			 1.0, -1.0,
-			 1.0,  1.0,
-		]);
+      topLeft.x, bottomRight.y,
+      topLeft.x, topLeft.y,
+      bottomRight.x, bottomRight.y,
+      bottomRight.x, topLeft.y,
+    ]);
     // prettier-ignore
     const tcords = new Float32Array([
-			0.0, 0.0,
-			0.0, 1.0,
-			1.0, 0.0,
-			1.0, 1.0,
-		]);
+      0.0, 0.0,
+      0.0, 1.0,
+      1.0, 0.0,
+      1.0, 1.0,
+    ]);
     // prettier-ignore
     const indices = new Uint16Array([
-			0, 1, 2,
-			1, 2, 3,
-		]);
+      0, 1, 2,
+      1, 2, 3,
+    ]);
     this.count = indices.length;
 
     const posBuffer = twgl.createBufferFromTypedArray(gl, positions);
@@ -270,6 +272,10 @@ class GlyphPostProcessRenderer implements Drawable {
 
   draw() {
     const { gl } = this;
+    const dpr = window.devicePixelRatio;
+    const { width, height } = gl.canvas;
+    const screenWidth = width / dpr;
+    const screenHeight = height / dpr;
 
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.SRC_COLOR, gl.ONE_MINUS_SRC_ALPHA);
@@ -277,10 +283,10 @@ class GlyphPostProcessRenderer implements Drawable {
     gl.useProgram(this.program);
     // prettier-ignore
     const matrix = [
-      1.0, 0.0, 0.0, 0.0,
-      0.0, 1.0, 0.0, 0.0,
+      2 / screenWidth, 0.0, 0.0, 0.0,
+      0.0, -2 / screenHeight, 0.0, 0.0,
       0.0, 0.0, 1.0, 0.0,
-      0.0, 0.0, 0.0, 1.0,
+      -1.0, 1.0, 0.0, 1.0,
     ];
     const [texture1, texture2] = this.frameBufferInfo.attachments;
     twgl.setUniforms(this.uniformSetters, {
@@ -357,18 +363,73 @@ export class Renderer {
 
   render(pathInfo: PathInfo) {
     const { gl } = this;
+    const dpr = window.devicePixelRatio;
     const { width, height } = gl.canvas;
+    const screenWidth = width / dpr;
+    const screenHeight = height / dpr;
+
+    const { boundingBox } = pathInfo;
+
+    const w0 = boundingBox.x1 + boundingBox.x2;
+    const h0 = boundingBox.y1 + boundingBox.y2;
+
+    // 不裁剪+缩放的材质大小
+    const w1 = w0 * transform.z;
+    const h1 = h0 * transform.z;
+
+    const topLeft1 = { x: transform.x, y: transform.y };
+    const bottomRight1 = {
+      x: topLeft1.x + w1,
+      y: topLeft1.y + h1,
+    };
+    // console.log(topLeft1, bottomRight1);
+
+    let fitScreenWidth = screenWidth;
+    let fitScreenHeight = screenHeight;
+    if (w0 > h0) {
+      fitScreenWidth = (fitScreenWidth * w0) / h0;
+    } else {
+      fitScreenHeight = (fitScreenHeight * h0) / w0;
+    }
+
+    const topLeft2 = {
+      x: clamp(topLeft1.x, 0, fitScreenWidth),
+      y: clamp(topLeft1.y, 0, fitScreenHeight),
+    };
+
+    const bottomRight2 = {
+      x: clamp(bottomRight1.x, 0, fitScreenWidth),
+      y: clamp(bottomRight1.y, 0, fitScreenHeight),
+    };
+    // console.log(topLeft2, bottomRight2);
+
+    // 裁剪之后+缩放的材质大小
+    const w2 = bottomRight2.x - topLeft2.x;
+    const h2 = bottomRight2.y - topLeft2.y;
+
+    // console.log(w2, h2);
+
+    const lx = clamp(topLeft2.x - topLeft1.x, 0, w1);
+    const ly = clamp(topLeft2.y - topLeft1.y, 0, h1);
+    const rx = clamp(bottomRight1.x - bottomRight2.x, 0, w1);
+    const ry = clamp(bottomRight1.y - bottomRight2.y, 0, h1);
+
+    // console.log(lx, ly, rx, ry);
+
+    if (!w2 || !h2) return;
+
+    console.log(w2, h2);
 
     twgl.resizeFramebufferInfo(
       gl,
       this.frameBufferInfo,
       this.attachments,
-      width,
-      height
+      w2 * dpr,
+      h2 * dpr
     );
     twgl.bindFramebufferInfo(gl, this.frameBufferInfo);
 
-    gl.viewport(0, 0, width, height);
+    gl.viewport(-lx * dpr, -ry * dpr, w1 * dpr, h1 * dpr);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
@@ -376,18 +437,19 @@ export class Renderer {
       aaDeltas: aaDeltas1,
       aaColors: aaColors,
     });
-    this.glyphRenderer.draw();
+    this.glyphRenderer.draw(w0, h0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.NONE]);
 
     this.glyphRenderer.genBuffer(pathInfo, {
       aaDeltas: aaDeltas2,
       aaColors: aaColors,
     });
-    this.glyphRenderer.draw();
+    this.glyphRenderer.draw(w0, h0);
     gl.drawBuffers([gl.NONE, gl.COLOR_ATTACHMENT1]);
 
     twgl.bindFramebufferInfo(gl);
 
+    this.glyphPostProcessRenderer.genBuffer(topLeft2, bottomRight2);
     this.glyphPostProcessRenderer.draw();
   }
 }
